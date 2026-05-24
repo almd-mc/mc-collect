@@ -1,0 +1,258 @@
+// Minecraft block collection automation for 1.21.1.
+// Corresponds to PrismarineJS/mineflayer-collectblock.
+//
+// Usage:
+//   import mc_collect
+//   let targets = mc_collect.find_blocks_by_id(world, 46, bot_pos, 32)
+//   let plan = mc_collect.plan_collection(targets, bot_pos)
+
+// --- Types ---
+
+type Pos = { x: Int, y: Int, z: Int }
+
+type CollectTarget = {
+  pos: Pos,
+  block_id: Int,
+  distance: Float,
+}
+
+type CollectPlan = {
+  targets: List[CollectTarget],
+  total_distance: Float,
+}
+
+// --- Distance ---
+
+fn manhattan(a: Pos, b: Pos) -> Float = {
+  let dx = if a.x > b.x then a.x - b.x else b.x - a.x
+  let dy = if a.y > b.y then a.y - b.y else b.y - a.y
+  let dz = if a.z > b.z then a.z - b.z else b.z - a.z
+  int.to_float(dx + dy + dz)
+}
+
+fn pos_eq(a: Pos, b: Pos) -> Bool =
+  a.x == b.x and a.y == b.y and a.z == b.z
+
+// --- Block finding ---
+
+// Find blocks of a given ID within radius of center.
+// world_get: function that returns block ID at (x, y, z).
+fn find_blocks(
+  world_get: (Int, Int, Int) -> Int,
+  block_id: Int,
+  center: Pos,
+  radius: Int
+) -> List[CollectTarget] = {
+  var result: List[CollectTarget] = []
+  for dx in (0 - radius)..(radius + 1) {
+    for dy in (0 - radius)..(radius + 1) {
+      for dz in (0 - radius)..(radius + 1) {
+        let x = center.x + dx
+        let y = center.y + dy
+        let z = center.z + dz
+        let id = world_get(x, y, z)
+        if id == block_id then {
+          let pos: Pos = { x: x, y: y, z: z }
+          let dist = manhattan(center, pos)
+          result = result + [{ pos: pos, block_id: block_id, distance: dist }]
+        } else { () }
+      }
+    }
+  }
+  result
+}
+
+// Find nearest N blocks of a given type.
+fn find_nearest(
+  world_get: (Int, Int, Int) -> Int,
+  block_id: Int,
+  center: Pos,
+  radius: Int,
+  count: Int
+) -> List[CollectTarget] = {
+  let all = find_blocks(world_get, block_id, center, radius)
+  let sorted = sort_by_distance(all)
+  list.slice(sorted, 0, count)
+}
+
+// --- Sorting ---
+
+fn sort_by_distance(targets: List[CollectTarget]) -> List[CollectTarget] = {
+  var sorted: List[CollectTarget] = []
+  for t in targets {
+    sorted = insert_sorted(sorted, t)
+  }
+  sorted
+}
+
+local fn insert_sorted(sorted: List[CollectTarget], item: CollectTarget) -> List[CollectTarget] = {
+  var result: List[CollectTarget] = []
+  var inserted = false
+  for s in sorted {
+    if not inserted and item.distance < s.distance then {
+      result = result + [item]
+      inserted = true
+    } else { () }
+    result = result + [s]
+  }
+  if not inserted then result + [item]
+  else result
+}
+
+// --- Collection planning ---
+
+// Greedy nearest-neighbor ordering for collection.
+fn plan_collection(
+  targets: List[CollectTarget],
+  start: Pos
+) -> CollectPlan = {
+  if list.is_empty(targets) then { targets: [], total_distance: 0.0 }
+  else {
+    var remaining = list.slice(targets, 0, list.length(targets))
+    var current = start
+    var total_dist = 0.0
+    var ordered: List[CollectTarget] = []
+
+    while not list.is_empty(remaining) {
+      var best_idx = 0
+      var best_dist = manhattan(current, (list.get(remaining, 0) ?? { pos: start, block_id: 0, distance: 0.0 }).pos)
+      for i in 1..list.length(remaining) {
+        let t = list.get(remaining, i) ?? { pos: start, block_id: 0, distance: 0.0 }
+        let d = manhattan(current, t.pos)
+        if d < best_dist then { best_idx = i; best_dist = d } else { () }
+      }
+
+      let chosen = list.get(remaining, best_idx) ?? { pos: start, block_id: 0, distance: 0.0 }
+      ordered = ordered + [chosen]
+      total_dist = total_dist + best_dist
+      current = chosen.pos
+
+      var new_remaining: List[CollectTarget] = []
+      for i in 0..list.length(remaining) {
+        if i != best_idx then {
+          new_remaining = new_remaining + [list.get(remaining, i) ?? { pos: start, block_id: 0, distance: 0.0 }]
+        } else { () }
+      }
+      remaining = new_remaining
+    }
+
+    { targets: ordered, total_distance: total_dist }
+  }
+}
+
+// --- Dig time estimation ---
+
+// Estimated dig time (seconds). hardness-based formula from Minecraft wiki.
+fn dig_time(hardness: Float, has_correct_tool: Bool) -> Float = {
+  if hardness < 0.0 then -1.0
+  else if hardness == 0.0 then 0.05
+  else if has_correct_tool then hardness * 1.5
+  else hardness * 5.0
+}
+
+// Total estimated time: digging + movement (4.3 blocks/sec walk speed).
+fn total_time(plan: CollectPlan, avg_hardness: Float, has_tool: Bool) -> Float = {
+  let dig = dig_time(avg_hardness, has_tool) * int.to_float(list.length(plan.targets))
+  dig + plan.total_distance / 4.3
+}
+
+// --- Tests ---
+
+test "manhattan" where [
+  "same"     [ax = 0, ay = 0, az = 0, bx = 0, by = 0, bz = 0, want = 0.0],
+  "unit"     [ax = 0, ay = 0, az = 0, bx = 1, by = 0, bz = 0, want = 1.0],
+  "diagonal" [ax = 0, ay = 0, az = 0, bx = 3, by = 4, bz = 5, want = 12.0],
+] {
+  let a: Pos = { x: ax, y: ay, z: az }
+  let b: Pos = { x: bx, y: by, z: bz }
+  assert_eq(manhattan(a, b), want)
+}
+
+test "sort_by_distance" {
+  let a: CollectTarget = { pos: { x: 0, y: 0, z: 0 }, block_id: 1, distance: 5.0 }
+  let b: CollectTarget = { pos: { x: 1, y: 0, z: 0 }, block_id: 1, distance: 1.0 }
+  let c: CollectTarget = { pos: { x: 2, y: 0, z: 0 }, block_id: 1, distance: 3.0 }
+  let sorted = sort_by_distance([a, b, c])
+  assert_eq((list.get(sorted, 0) ?? b).distance, 1.0)
+  assert_eq((list.get(sorted, 1) ?? b).distance, 3.0)
+  assert_eq((list.get(sorted, 2) ?? b).distance, 5.0)
+}
+
+test "insert_sorted - middle" {
+  let a: CollectTarget = { pos: { x: 0, y: 0, z: 0 }, block_id: 1, distance: 1.0 }
+  let b: CollectTarget = { pos: { x: 0, y: 0, z: 0 }, block_id: 1, distance: 3.0 }
+  let c: CollectTarget = { pos: { x: 0, y: 0, z: 0 }, block_id: 1, distance: 2.0 }
+  let result = insert_sorted([a, b], c)
+  assert_eq(list.length(result), 3)
+  assert_eq((list.get(result, 1) ?? a).distance, 2.0)
+}
+
+test "plan_collection - empty" {
+  let plan = plan_collection([], { x: 0, y: 0, z: 0 })
+  assert_eq(list.length(plan.targets), 0)
+  assert_eq(plan.total_distance, 0.0)
+}
+
+test "plan_collection - single" {
+  let t: CollectTarget = { pos: { x: 3, y: 0, z: 0 }, block_id: 1, distance: 3.0 }
+  let plan = plan_collection([t], { x: 0, y: 0, z: 0 })
+  assert_eq(list.length(plan.targets), 1)
+  assert_eq(plan.total_distance, 3.0)
+}
+
+test "plan_collection - nearest first" {
+  let far: CollectTarget = { pos: { x: 10, y: 0, z: 0 }, block_id: 1, distance: 10.0 }
+  let near: CollectTarget = { pos: { x: 2, y: 0, z: 0 }, block_id: 1, distance: 2.0 }
+  let plan = plan_collection([far, near], { x: 0, y: 0, z: 0 })
+  let first = list.get(plan.targets, 0) ?? far
+  assert(pos_eq(first.pos, { x: 2, y: 0, z: 0 }))
+}
+
+test "plan_collection - three targets greedy" {
+  let a: CollectTarget = { pos: { x: 5, y: 0, z: 0 }, block_id: 1, distance: 5.0 }
+  let b: CollectTarget = { pos: { x: 1, y: 0, z: 0 }, block_id: 1, distance: 1.0 }
+  let c: CollectTarget = { pos: { x: 3, y: 0, z: 0 }, block_id: 1, distance: 3.0 }
+  let plan = plan_collection([a, b, c], { x: 0, y: 0, z: 0 })
+  let first = list.get(plan.targets, 0) ?? a
+  let second = list.get(plan.targets, 1) ?? a
+  let third = list.get(plan.targets, 2) ?? a
+  assert(pos_eq(first.pos, { x: 1, y: 0, z: 0 }))
+  assert(pos_eq(second.pos, { x: 3, y: 0, z: 0 }))
+  assert(pos_eq(third.pos, { x: 5, y: 0, z: 0 }))
+}
+
+test "find_blocks - with mock world" {
+  // Mock: block_id=1 at (1,0,0) and (0,1,0), rest are 0
+  let get = (x: Int, y: Int, z: Int) => {
+    if x == 1 and y == 0 and z == 0 then 1
+    else if x == 0 and y == 1 and z == 0 then 1
+    else 0
+  }
+  let targets = find_blocks(get, 1, { x: 0, y: 0, z: 0 }, 1)
+  assert_eq(list.length(targets), 2)
+}
+
+test "find_nearest - limit" {
+  let get = (x: Int, y: Int, z: Int) => {
+    if x == 1 and y == 0 and z == 0 then 1
+    else if x == 0 and y == 1 and z == 0 then 1
+    else if x == 0 and y == 0 and z == 1 then 1
+    else 0
+  }
+  let nearest = find_nearest(get, 1, { x: 0, y: 0, z: 0 }, 1, 2)
+  assert_eq(list.length(nearest), 2)
+}
+
+test "dig_time" where [
+  "instant"    [h = 0.0,  tool = true,  want = 0.05],
+  "unbreakable" [h = -1.0, tool = true,  want = -1.0],
+  "with_tool"  [h = 2.0,  tool = true,  want = 3.0],
+  "no_tool"    [h = 2.0,  tool = false, want = 10.0],
+] {
+  assert_eq(dig_time(h, tool), want)
+}
+
+test "pos_eq" {
+  assert(pos_eq({ x: 1, y: 2, z: 3 }, { x: 1, y: 2, z: 3 }))
+  assert(not pos_eq({ x: 1, y: 2, z: 3 }, { x: 1, y: 2, z: 4 }))
+}
