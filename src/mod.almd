@@ -27,7 +27,7 @@ fn manhattan(a: Pos, b: Pos) -> Float = {
   let dx = if a.x > b.x then a.x - b.x else b.x - a.x
   let dy = if a.y > b.y then a.y - b.y else b.y - a.y
   let dz = if a.z > b.z then a.z - b.z else b.z - a.z
-  int.to_float(dx + dy + dz)
+  float.from(dx + dy + dz)
 }
 
 fn pos_eq(a: Pos, b: Pos) -> Bool =
@@ -152,7 +152,7 @@ fn dig_time(hardness: Float, has_correct_tool: Bool) -> Float = {
 
 // Total estimated time: digging + movement (4.3 blocks/sec walk speed).
 fn total_time(plan: CollectPlan, avg_hardness: Float, has_tool: Bool) -> Float = {
-  let dig = dig_time(avg_hardness, has_tool) * int.to_float(list.length(plan.targets))
+  let dig = dig_time(avg_hardness, has_tool) * float.from(list.length(plan.targets))
   dig + plan.total_distance / 4.3
 }
 
