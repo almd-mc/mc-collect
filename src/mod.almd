@@ -44,9 +44,9 @@ fn find_blocks(
   radius: Int
 ) -> List[CollectTarget] = {
   var result: List[CollectTarget] = []
-  for dx in (0 - radius)..(radius + 1) {
-    for dy in (0 - radius)..(radius + 1) {
-      for dz in (0 - radius)..(radius + 1) {
+  for dx in (0 - radius)..<(radius + 1) {
+    for dy in (0 - radius)..<(radius + 1) {
+      for dz in (0 - radius)..<(radius + 1) {
         let x = center.x + dx
         let y = center.y + dy
         let z = center.z + dz
@@ -116,7 +116,7 @@ fn plan_collection(
     while not list.is_empty(remaining) {
       var best_idx = 0
       var best_dist = manhattan(current, (list.get(remaining, 0) ?? { pos: start, block_id: 0, distance: 0.0 }).pos)
-      for i in 1..list.length(remaining) {
+      for i in 1..<list.length(remaining) {
         let t = list.get(remaining, i) ?? { pos: start, block_id: 0, distance: 0.0 }
         let d = manhattan(current, t.pos)
         if d < best_dist then { best_idx = i; best_dist = d } else { () }
@@ -128,7 +128,7 @@ fn plan_collection(
       current = chosen.pos
 
       var new_remaining: List[CollectTarget] = []
-      for i in 0..list.length(remaining) {
+      for i in 0..<list.length(remaining) {
         if i != best_idx then {
           new_remaining = new_remaining + [list.get(remaining, i) ?? { pos: start, block_id: 0, distance: 0.0 }]
         } else { () }
